@@ -1,0 +1,17 @@
+# Rust build output
+/target/
+
+# Local build and release artifacts
+/bin/
+/dist/
+Dockerfile.cross
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Kubeconfig files may contain secrets
+*.kubeconfig

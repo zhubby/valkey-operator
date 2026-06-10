@@ -1,0 +1,11 @@
+**
+
+!Cargo.toml
+!Cargo.lock
+!src/**
+!assets/**
+
+target/
+dist/
+bin/
+.git/

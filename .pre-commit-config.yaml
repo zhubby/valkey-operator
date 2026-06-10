@@ -1,0 +1,33 @@
+default_stages: [pre-commit]
+minimum_pre_commit_version: "2.0.0"
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        language: system
+        entry: cargo fmt --all --check
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        language: system
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        language: system
+        entry: cargo test --all-targets --all-features
+        pass_filenames: false
+
+      - id: manifests
+        name: validate manifests
+        language: system
+        entry: make manifests
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v0.7.1
+    hooks:
+      - id: check-merge-conflict
