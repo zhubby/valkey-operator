@@ -198,6 +198,12 @@ pub async fn reconcile(cluster: Arc<ValkeyCluster>, ctx: Arc<Context>) -> Result
     }
 
     if !state.unassigned_slots().is_empty() {
+        let assigned = assign_slots_to_existing_primaries(&state).await?;
+        if assigned > 0 {
+            set_condition_pair(&mut working, "RepairingSlots", "Assigning unassigned slots");
+            update_status(client, &mut working, Some(&state)).await?;
+            return Ok(Action::requeue(REQUEUE_FAST));
+        }
         set_condition(
             &mut status_mut(&mut working).conditions,
             generation,
@@ -514,20 +520,74 @@ async fn assign_slots_to_pending_primaries(
     if primaries.is_empty() {
         return Ok(0);
     }
-    let mut slots = state.unassigned_slots();
+    let slots = state.unassigned_slots();
     if slots.is_empty() {
         return Ok(0);
     }
-    let mut unassigned = slots
-        .iter()
-        .map(|slot| slot.end - slot.start + 1)
-        .sum::<i32>();
+    let slot_plans = split_slots_evenly(slots, primaries.len());
     let mut assigned = 0;
-    for node in primaries {
-        if slots.is_empty() {
-            break;
+    for (node, node_ranges) in primaries.into_iter().zip(slot_plans) {
+        if node_ranges.is_empty() {
+            continue;
         }
-        let remaining_primaries = (state.pending_nodes.len() as i32 - assigned as i32).max(1);
+        add_slot_ranges(&node, &node_ranges).await?;
+        assigned += 1;
+    }
+    Ok(assigned)
+}
+
+async fn assign_slots_to_existing_primaries(state: &ClusterState) -> Result<usize> {
+    let slots = state.unassigned_slots();
+    if slots.is_empty() {
+        return Ok(0);
+    }
+    let primaries = state
+        .shards
+        .iter()
+        .filter_map(ShardState::primary)
+        .filter(|node| {
+            !node
+                .flags
+                .iter()
+                .any(|flag| flag == "fail" || flag == "pfail")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if primaries.is_empty() {
+        return Ok(0);
+    }
+
+    let slot_plans = split_slots_evenly(slots, primaries.len());
+    let mut assigned = 0;
+    for (node, node_ranges) in primaries.into_iter().zip(slot_plans) {
+        if node_ranges.is_empty() {
+            continue;
+        }
+        add_slot_ranges(&node, &node_ranges).await?;
+        assigned += 1;
+    }
+    Ok(assigned)
+}
+
+async fn add_slot_ranges(node: &NodeState, ranges: &[SlotsRange]) -> Result<()> {
+    let mut args = vec!["CLUSTER".to_string(), "ADDSLOTSRANGE".to_string()];
+    for range in ranges {
+        args.push(range.start.to_string());
+        args.push(range.end.to_string());
+    }
+    node.client.query_owned::<String>(&args).await?;
+    Ok(())
+}
+
+fn split_slots_evenly(slots: Vec<SlotsRange>, primary_count: usize) -> Vec<Vec<SlotsRange>> {
+    if primary_count == 0 {
+        return Vec::new();
+    }
+    let mut slots = slots;
+    let mut unassigned = valkey::count_slots(&slots);
+    let mut output = Vec::with_capacity(primary_count);
+    for assigned in 0..primary_count {
+        let remaining_primaries = (primary_count - assigned) as i32;
         let target = (unassigned + remaining_primaries - 1) / remaining_primaries;
         let mut node_ranges = Vec::new();
         let mut remaining = target;
@@ -544,15 +604,9 @@ async fn assign_slots_to_pending_primaries(
                 slots[0].start = end + 1;
             }
         }
-        let mut args = vec!["CLUSTER".to_string(), "ADDSLOTSRANGE".to_string()];
-        for range in &node_ranges {
-            args.push(range.start.to_string());
-            args.push(range.end.to_string());
-        }
-        node.client.query_owned::<String>(&args).await?;
-        assigned += 1;
+        output.push(node_ranges);
     }
-    Ok(assigned)
+    output
 }
 
 async fn replicate_pending_replicas(
@@ -996,4 +1050,89 @@ fn count_ready_shards(state: &ClusterState, cluster: &ValkeyCluster) -> i32 {
                 })
         })
         .count() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_slots_evenly_covers_full_slot_range_for_three_primaries() {
+        let plans = split_slots_evenly(
+            vec![SlotsRange {
+                start: 0,
+                end: valkey::TOTAL_SLOTS - 1,
+            }],
+            3,
+        );
+
+        assert_eq!(plans.len(), 3);
+        assert_eq!(
+            plans,
+            vec![
+                vec![SlotsRange {
+                    start: 0,
+                    end: 5461,
+                }],
+                vec![SlotsRange {
+                    start: 5462,
+                    end: 10922,
+                }],
+                vec![SlotsRange {
+                    start: 10923,
+                    end: 16383,
+                }],
+            ]
+        );
+        assert_eq!(
+            plans
+                .iter()
+                .map(|ranges| valkey::count_slots(ranges))
+                .sum::<i32>(),
+            valkey::TOTAL_SLOTS
+        );
+    }
+
+    #[test]
+    fn split_slots_evenly_preserves_gaps_between_unassigned_ranges() {
+        let plans = split_slots_evenly(
+            vec![
+                SlotsRange { start: 0, end: 2 },
+                SlotsRange { start: 10, end: 14 },
+            ],
+            3,
+        );
+
+        assert_eq!(
+            plans,
+            vec![
+                vec![SlotsRange { start: 0, end: 2 }],
+                vec![SlotsRange { start: 10, end: 12 }],
+                vec![SlotsRange { start: 13, end: 14 }],
+            ]
+        );
+        assert_eq!(
+            plans
+                .iter()
+                .map(|ranges| valkey::count_slots(ranges))
+                .sum::<i32>(),
+            8
+        );
+    }
+
+    #[test]
+    fn split_slots_evenly_handles_zero_primaries_and_more_primaries_than_slots() {
+        assert!(split_slots_evenly(vec![SlotsRange { start: 5, end: 6 }], 0).is_empty());
+
+        let plans = split_slots_evenly(vec![SlotsRange { start: 5, end: 6 }], 3);
+
+        assert_eq!(
+            plans,
+            vec![
+                vec![SlotsRange { start: 5, end: 5 }],
+                vec![SlotsRange { start: 6, end: 6 }],
+                Vec::new(),
+            ]
+        );
+    }
 }

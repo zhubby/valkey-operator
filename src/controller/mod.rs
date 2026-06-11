@@ -12,6 +12,7 @@ use kube::api::{Api, Patch, PatchParams, Resource};
 use kube::{Client, ResourceExt};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::api::{ValkeyCluster, ValkeyNode};
 use crate::error::Result;
@@ -147,7 +148,31 @@ where
     K: Clone + Debug + DeserializeOwned + Serialize,
 {
     let pp = PatchParams::apply(FIELD_MANAGER).force();
-    Ok(api.patch(name, &pp, &Patch::Apply(obj)).await?)
+    let mut patch = serde_json::to_value(obj)?;
+    sanitize_apply_patch(&mut patch);
+    Ok(api.patch(name, &pp, &Patch::Apply(&patch)).await?)
+}
+
+fn sanitize_apply_patch(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.remove("status");
+    let Some(metadata) = object.get_mut("metadata").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for field in [
+        "creationTimestamp",
+        "deletionGracePeriodSeconds",
+        "deletionTimestamp",
+        "generation",
+        "managedFields",
+        "resourceVersion",
+        "selfLink",
+        "uid",
+    ] {
+        metadata.remove(field);
+    }
 }
 
 pub async fn patch_status<K, S>(api: &Api<K>, name: &str, status: &S) -> Result<K>
@@ -155,9 +180,9 @@ where
     K: Clone + Debug + DeserializeOwned,
     S: Serialize + Debug,
 {
-    let pp = PatchParams::apply(FIELD_MANAGER).force();
+    let pp = PatchParams::default();
     let patch = serde_json::json!({ "status": status });
-    Ok(api.patch_status(name, &pp, &Patch::Apply(&patch)).await?)
+    Ok(api.patch_status(name, &pp, &Patch::Merge(&patch)).await?)
 }
 
 pub fn set_condition(
@@ -238,5 +263,47 @@ pub fn node_role_and_shard(address: &str, nodes: &[ValkeyNode]) -> (String, i32)
         (ROLE_PRIMARY.to_string(), shard_index)
     } else {
         (ROLE_REPLICA.to_string(), shard_index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sanitize_apply_patch_removes_server_owned_fields() {
+        let mut value = json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {
+                "name": "example",
+                "namespace": "default",
+                "managedFields": [],
+                "resourceVersion": "42",
+                "uid": "abc",
+                "creationTimestamp": "2026-06-11T00:00:00Z",
+                "generation": 2
+            },
+            "status": { "ready": true },
+            "data": {}
+        });
+
+        sanitize_apply_patch(&mut value);
+
+        assert_eq!(value.get("status"), None);
+        let metadata = value
+            .get("metadata")
+            .and_then(Value::as_object)
+            .expect("metadata should remain");
+        assert_eq!(
+            metadata.get("name").and_then(Value::as_str),
+            Some("example")
+        );
+        assert!(!metadata.contains_key("managedFields"));
+        assert!(!metadata.contains_key("resourceVersion"));
+        assert!(!metadata.contains_key("uid"));
+        assert!(!metadata.contains_key("creationTimestamp"));
+        assert!(!metadata.contains_key("generation"));
     }
 }

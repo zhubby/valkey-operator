@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{Deployment, StatefulSet};
 use k8s_openapi::api::core::v1::{ConfigMap, PersistentVolumeClaim, Secret, Service};
@@ -27,7 +27,14 @@ struct Args {
     #[arg(long = "leader-elect", default_value_t = false)]
     _leader_elect: bool,
 
-    #[arg(long = "metrics-secure", default_value_t = true)]
+    #[arg(
+        long = "metrics-secure",
+        default_value_t = true,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = true,
+        action = ArgAction::Set,
+    )]
     metrics_secure: bool,
 
     #[arg(long = "enable-http2", default_value_t = false)]
@@ -193,4 +200,23 @@ where
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metrics_secure_accepts_explicit_false() {
+        let args = Args::parse_from(["manager", "--metrics-secure=false"]);
+
+        assert!(!args.metrics_secure);
+    }
+
+    #[test]
+    fn metrics_secure_accepts_bare_flag() {
+        let args = Args::parse_from(["manager", "--metrics-secure"]);
+
+        assert!(args.metrics_secure);
+    }
 }

@@ -6,6 +6,23 @@ KUBECTL              ?= kubectl
 KUSTOMIZE            ?= kustomize
 KUSTOMIZE_BUILD      ?= $(shell if command -v "$(KUSTOMIZE)" >/dev/null 2>&1; then printf '%s build' "$(KUSTOMIZE)"; elif command -v kubectl >/dev/null 2>&1; then printf 'kubectl kustomize'; else printf '%s build' "$(KUSTOMIZE)"; fi)
 PLATFORMS            ?= linux/amd64,linux/arm64
+CONTAINER_PLATFORM   ?=
+RUST_IMAGE           ?= rust:1.95-bookworm
+RUNTIME_IMAGE        ?= debian:bookworm-slim
+CARGO_REGISTRY_REPLACE_WITH ?=
+CARGO_REGISTRY_REPLACEMENT_URL ?=
+
+DOCKER_BUILD_ARGS = --build-arg RUST_IMAGE=$(RUST_IMAGE) --build-arg RUNTIME_IMAGE=$(RUNTIME_IMAGE)
+DOCKER_PLATFORM_ARG =
+ifneq ($(strip $(CONTAINER_PLATFORM)),)
+  DOCKER_PLATFORM_ARG = --platform=$(CONTAINER_PLATFORM)
+endif
+ifneq ($(strip $(CARGO_REGISTRY_REPLACE_WITH)),)
+  DOCKER_BUILD_ARGS += --build-arg CARGO_REGISTRY_REPLACE_WITH=$(CARGO_REGISTRY_REPLACE_WITH)
+endif
+ifneq ($(strip $(CARGO_REGISTRY_REPLACEMENT_URL)),)
+  DOCKER_BUILD_ARGS += --build-arg CARGO_REGISTRY_REPLACEMENT_URL=$(CARGO_REGISTRY_REPLACEMENT_URL)
+endif
 
 SHELL = /usr/bin/env bash
 .SHELLFLAGS = -ec
@@ -63,7 +80,7 @@ run: ## Run the controller from your host.
 
 .PHONY: docker-build
 docker-build: ## Build the manager container image.
-	$(CONTAINER_TOOL) build -t $(CONTAINER_IMAGE_NAME) .
+	$(CONTAINER_TOOL) build $(DOCKER_PLATFORM_ARG) $(DOCKER_BUILD_ARGS) -t $(CONTAINER_IMAGE_NAME) .
 
 .PHONY: docker-push
 docker-push: ## Push the manager container image.
@@ -73,7 +90,7 @@ docker-push: ## Push the manager container image.
 docker-buildx: ## Build and push a multi-architecture manager image.
 	- $(CONTAINER_TOOL) buildx create --name valkey-operator-builder
 	$(CONTAINER_TOOL) buildx use valkey-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag $(CONTAINER_IMAGE_NAME) .
+	- $(CONTAINER_TOOL) buildx build --push $(DOCKER_BUILD_ARGS) --platform=$(PLATFORMS) --tag $(CONTAINER_IMAGE_NAME) .
 	- $(CONTAINER_TOOL) buildx rm valkey-operator-builder
 
 .PHONY: build-installer
