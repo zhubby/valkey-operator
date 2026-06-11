@@ -1,0 +1,10 @@
+# This patch enables the Rust manager's Axum management API endpoint.
+- op: add
+  path: /spec/template/spec/containers/0/args/2
+  value: --management-api-bind-address=:8082
+- op: add
+  path: /spec/template/spec/containers/0/ports/1
+  value:
+    containerPort: 8082
+    name: management
+    protocol: TCP

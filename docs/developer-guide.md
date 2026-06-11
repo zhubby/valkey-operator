@@ -13,6 +13,10 @@ make lint-fix      # Run clippy with auto-fix
 make fmt           # Run cargo fmt
 make fmt-check     # Check cargo fmt output
 make check         # Type-check all Rust targets
+make ui-install    # Install management UI dependencies
+make ui-typecheck  # Type-check the management UI
+make ui-lint       # Lint the management UI
+make ui-build      # Build the management UI
 make build         # Build the manager binary
 make manifests     # Validate checked-in CRD manifests with kustomize
 ```
@@ -118,6 +122,14 @@ This produces `dist/install.yaml` which can be applied with `kubectl apply -f`.
 
 `make run` starts the Rust manager locally against the Kubernetes cluster selected by your kubeconfig.
 Since neither Pod IPs are routable, nor Pod FQDNs are resolvable outside the cluster, any attempt by the operator to connect to a Valkey pod will fail.
+
+To enable the optional management API while running locally:
+
+```bash
+make run ARGS="--management-api-bind-address=:8082"
+```
+
+For the Next.js management UI, API endpoint contract, and optional Kustomize overlay, see [management-ui.md](./management-ui.md).
 
 Here is a procedure to make it work, but you might need to adapt depending on your setup.
 

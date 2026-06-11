@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use valkey_operator::api::{ValkeyCluster, ValkeyNode};
 use valkey_operator::controller::{Context, cluster, node};
+use valkey_operator::management_api;
 use warp::Filter;
 
 #[derive(Debug, Parser)]
@@ -23,6 +24,9 @@ struct Args {
 
     #[arg(long = "health-probe-bind-address", default_value = ":8081")]
     health_probe_bind_address: String,
+
+    #[arg(long = "management-api-bind-address", default_value = "0")]
+    management_api_bind_address: String,
 
     #[arg(long = "leader-elect", default_value_t = false)]
     _leader_elect: bool,
@@ -75,6 +79,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let client = kube::Client::try_default().await?;
+
+    if args.management_api_bind_address != "0" {
+        let management_addr = parse_probe_addr(&args.management_api_bind_address)?;
+        let management_client = client.clone();
+        let watch_namespaces = args.watch_namespace.clone();
+        tokio::spawn(async move {
+            if let Err(err) =
+                management_api::serve(management_addr, management_client, watch_namespaces).await
+            {
+                error!(%err, "management API server exited");
+            }
+        });
+    }
+
     let context = Arc::new(Context {
         client: client.clone(),
         watch_namespaces: args.watch_namespace.clone(),

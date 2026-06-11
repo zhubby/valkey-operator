@@ -27,6 +27,7 @@ The operator simplifies deploying Valkey Clusters on Kubernetes, handling scalin
 
 - **Users:** [Quickstart](./docs/quickstart.md)
 - **Contributors:** [Developer Guide](./docs/developer-guide.md)
+- **Management UI:** [Management UI and API](./docs/management-ui.md)
 
 ## Community & Support
 

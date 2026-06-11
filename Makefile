@@ -2,6 +2,7 @@ IMG                  ?= controller:latest
 CONTAINER_IMAGE_NAME ?= $(IMG)
 CONTAINER_TOOL       ?= docker
 CARGO                ?= cargo
+BUN                  ?= bun
 KUBECTL              ?= kubectl
 KUSTOMIZE            ?= kustomize
 KUSTOMIZE_BUILD      ?= $(shell if command -v "$(KUSTOMIZE)" >/dev/null 2>&1; then printf '%s build' "$(KUSTOMIZE)"; elif command -v kubectl >/dev/null 2>&1; then printf 'kubectl kustomize'; else printf '%s build' "$(KUSTOMIZE)"; fi)
@@ -50,6 +51,26 @@ fmt-check: ## Check Rust formatting.
 check: ## Type-check all Rust targets.
 	$(CARGO) check --all-targets --all-features
 
+.PHONY: ui-install
+ui-install: ## Install UI dependencies with Bun.
+	cd ui && $(BUN) install
+
+.PHONY: ui-dev
+ui-dev: ## Run the Next.js management UI.
+	cd ui && $(BUN) run dev
+
+.PHONY: ui-typecheck
+ui-typecheck: ## Type-check the management UI.
+	cd ui && $(BUN) run typecheck
+
+.PHONY: ui-lint
+ui-lint: ## Run UI linting.
+	cd ui && $(BUN) run lint
+
+.PHONY: ui-build
+ui-build: ## Build the management UI.
+	cd ui && $(BUN) run build
+
 .PHONY: lint
 lint: ## Run clippy with warnings denied.
 	$(CARGO) clippy --all-targets --all-features -- -D warnings
@@ -76,7 +97,7 @@ build: ## Build the Rust manager binary.
 
 .PHONY: run
 run: ## Run the controller from your host.
-	$(CARGO) run --bin manager --
+	$(CARGO) run --bin manager -- $(ARGS)
 
 .PHONY: docker-build
 docker-build: ## Build the manager container image.

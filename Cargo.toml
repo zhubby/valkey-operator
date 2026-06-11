@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0"
+axum = "0.8"
 base64 = "0.22"
 clap = { version = "4.5", features = ["derive", "env"] }
 futures = "0.3"
@@ -27,7 +28,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 warp = { version = "0.4", features = ["server"] }
 
 [dev-dependencies]
+http-body-util = "0.1"
+kube-client = "3.1.0"
 pretty_assertions = "1.4"
+tower = "0.5"
+tower-test = "0.4"
 
 [[bin]]
 name = "manager"
