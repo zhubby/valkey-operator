@@ -47,6 +47,23 @@ cargo test valkey::tests::plan_rebalance
 make docker-build docker-push IMG=<some-registry>/valkey-operator:tag
 ```
 
+## Publish images with GitHub Actions
+
+The `Publish` GitHub Actions workflow builds multi-architecture images and publishes them to GitHub Container Registry:
+
+```text
+ghcr.io/<owner>/<repo>
+```
+
+It runs on pushes to `main`, `v*` tags, and manual `workflow_dispatch` runs. Pull requests build the image without pushing it.
+
+Published tags include:
+
+* `latest` for the default branch
+* the branch name for branch pushes
+* semver tags for `v*` releases, such as `1.2.3`, `1.2`, `v1.2.3`, and `v1.2`
+* the short commit SHA
+
 **Install the CRDs into the cluster:**
 
 ```sh
